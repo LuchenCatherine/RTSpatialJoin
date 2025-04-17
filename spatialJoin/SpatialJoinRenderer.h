@@ -6,6 +6,8 @@
 #include <fstream>
 #include "gdt/math/AffineSpace.h"
 #include <chrono>
+#include <iostream>
+#include <fstream>
 
 /*! \namespace osc - Optix Siggraph Course */
 namespace osc {
@@ -28,10 +30,13 @@ namespace osc {
         public: 
             /*! constructor - performs all setup, including initializing 
             optix, creates module, pipeline, programs, SBT, etc. */
+            SpatialJoinRenderer();
             SpatialJoinRenderer(const TriangleMesh &model1, const TriangleMesh &model2, const int launchDim);
 
             /*! get the spatial join result. */
             void render();
+
+            void render(const TriangleMesh& model1, const TriangleMesh& model2, const int launchDim, std::ofstream& outFile);
             
             /*! download the rendered result */
             void downloadResult(bool h_result[]);

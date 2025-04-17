@@ -79,7 +79,7 @@ namespace osc {
     void TriangleMesh::addTriangleMesh(const std::string& off_file_path)
     {
         std::cout << GDT_TERMINAL_YELLOW;
-        std::cout << "#spatial join: loading 3D object(.off) file: " << off_file_path << std::endl;
+        // std::cout << "#spatial join: loading 3D object(.off) file: " << off_file_path << std::endl;
         std::cout << GDT_TERMINAL_DEFAULT;
         std::ifstream ifs(off_file_path, std::ifstream::in);
 
@@ -115,6 +115,7 @@ namespace osc {
             stringstream >> face_num_v;
 
             if (face_num_v != 3) {
+                printf("face_num_v: %d,line: %d\n", face_num_v, linesReadCounter);
             throw std::runtime_error("Not a triangle mesh!");
             }
             stringstream >> idx_x >> idx_y >> idx_z;
@@ -125,7 +126,7 @@ namespace osc {
         linesReadCounter++;
 
         }// File Line Stream Loop
-        printf("\tThe model in the file have : %d trinagles and %d vertices\n", numtri_value, numv_value);
+        // printf("\tThe model in the file have : %d trinagles and %d vertices\n", numtri_value, numv_value);
 
         ifs.close();
     
@@ -133,6 +134,99 @@ namespace osc {
 
     /*! constructor - performs all setup, including initializing
     optix, creates module, pipeline, programs, SBT, etc. */
+
+    SpatialJoinRenderer::SpatialJoinRenderer()
+    {
+
+        std::cout << "#spatial join: init, create context, create module ..." << std::endl;
+        initOptix();
+        createContext();
+        createModule();
+
+        std::cout << "#spatial join: create raygen, miss, hit programs ..." << std::endl;
+        createRaygenPrograms();
+        createMissPrograms();
+        createHitgroupPrograms();
+
+        std::cout << "#spatial join: create pipline ..." << std::endl;
+        createPipeline();
+
+        std::cout << "#spatial join: build SBT table ..." << std::endl;
+        buildSBT();
+
+    }
+
+
+    void SpatialJoinRenderer::render(const TriangleMesh& model1, const TriangleMesh& model2, const int launchDim, std::ofstream& outFile)
+    {
+        std::chrono::duration<double> duration;
+        std::cout << "#spatial join: upload model data ..." << std::endl;
+
+        auto t1 = std::chrono::high_resolution_clock::now();
+        uploadMeshData(model1, model2);
+        auto t2 = std::chrono::high_resolution_clock::now();
+
+
+        std::cout << "#spatial join: build acceleration structures ..." << std::endl;
+        auto t3 = std::chrono::high_resolution_clock::now();
+        launchParams.traversable1 = buildAccel(model1, vertexBuffer1, indexBuffer1, asBuffer1);
+        launchParams.traversable2 = buildAccel(model2, vertexBuffer2, indexBuffer2, asBuffer2);
+        auto t4 = std::chrono::high_resolution_clock::now();
+
+
+
+        std::cout << "#spatial join: launchDim: " << launchDim << std::endl;
+        auto t5 = std::chrono::high_resolution_clock::now();
+        resultBuffer.alloc(3*(model1.index.size() + model2.index.size()) * sizeof(bool));
+        launchParams.resultBuffer = resultBuffer;
+        launchParams.dimension_x = launchDim;
+        launchParamsBuffer.alloc(sizeof(launchParams));
+
+        launchParamsBuffer.upload(&launchParams,1);
+
+        OPTIX_CHECK(optixLaunch(/*! pipeline we're launching launch: */
+                            pipeline,stream,
+                            /*! parameters and SBT */
+                            launchParamsBuffer.d_pointer(),
+                            launchParamsBuffer.sizeInBytes,
+                            &sbt,
+                            /*! dimensions of the launch: */
+                            launchParams.dimension_x, // 2^16
+                            1,
+                            1
+                            ));
+        // sync - make sure the frame is rendered before we download and
+        // display (obviously, for a high-performance application you
+        // want to use streams and double-buffering, but for this simple
+        // example, this will have to do)
+        CUDA_SYNC_CHECK();
+        
+
+        vertexBuffer1.free();
+        vertexBuffer2.free();
+        indexBuffer1.free();
+        indexBuffer2.free();
+        asBuffer1.free();
+        asBuffer2.free();
+
+        // free after downloading results
+        // launchParamsBuffer.free();
+        auto t6 = std::chrono::high_resolution_clock::now();
+        
+        duration = t2 - t1;
+        outFile << "RT upload meshes: " << duration.count() << " seconds" << std::endl;
+        duration = t4 - t3;
+        outFile << "RT building spatial indexing: " << duration.count() << " seconds" << std::endl;
+        duration = t6 - t5;
+        outFile << "RT compute spatial intersection: " << duration.count() << " seconds" << std::endl;
+
+
+    }
+
+
+    /*! constructor - performs all setup, including initializing
+    optix, creates module, pipeline, programs, SBT, etc. */
+
     SpatialJoinRenderer::SpatialJoinRenderer(const TriangleMesh& model1, const TriangleMesh& model2, const int launchDim) 
     {
         auto t1 = std::chrono::high_resolution_clock::now();
@@ -156,6 +250,7 @@ namespace osc {
         std::cout << "#spatial join: creating hitgroup programs ..." << std::endl;
         createHitgroupPrograms();
         
+
         auto t23 = std::chrono::high_resolution_clock::now();
         std::cout << "#spatial join: upload model data ..." << std::endl;
         uploadMeshData(model1, model2);
@@ -293,6 +388,7 @@ namespace osc {
         // ==================================================================
         // prepare compaction
         // ==================================================================
+        
 
         CUDABuffer compactedSizeBuffer;
         compactedSizeBuffer.alloc(sizeof(uint64_t));
@@ -304,12 +400,37 @@ namespace osc {
         // ==================================================================
         // execute build (main stage)
         // ==================================================================
+        // 1. 
+        cudaEvent_t startEvent, endEvent;
+        cudaEventCreate(&startEvent);
+        cudaEventCreate(&endEvent);
+        // 2. 
+        cudaError_t err = cudaEventRecord(startEvent, stream);
 
         CUDABuffer tempBuffer;
         tempBuffer.alloc(blasBufferSizes.tempSizeInBytes);
 
         CUDABuffer outputBuffer;
         outputBuffer.alloc(blasBufferSizes.outputSizeInBytes);
+        
+        if (err != cudaSuccess) {
+            std::cerr << "Error recording start event: " << cudaGetErrorString(err) << std::endl;
+        }
+        
+        // 4. Record the end time (after the OptiX operation)
+        cudaEventRecord(endEvent, stream);
+
+        // 5. Synchronize and calculate the elapsed time
+        cudaEventSynchronize(endEvent);  // Ensure the events have finished
+        float elapsedTime;
+        cudaEventElapsedTime(&elapsedTime, startEvent, endEvent);  // Get the time in milliseconds
+
+        // 6. Print the result
+        std::cout << "OptiX operation took " << elapsedTime << " ms" << std::endl;
+
+        // 7. Cleanup events
+        cudaEventDestroy(startEvent);
+        cudaEventDestroy(endEvent);
 
         OPTIX_CHECK(optixAccelBuild(optixContext,
                                 /* stream */0,
@@ -326,7 +447,11 @@ namespace osc {
 
                                 &emitDesc,1
                                 ));
+
+
         CUDA_SYNC_CHECK();
+
+        
 
         // ==================================================================
         // perform compaction
@@ -351,6 +476,7 @@ namespace osc {
         compactedSizeBuffer.free();
 
         return asHandle;
+
 
     }
 
@@ -656,6 +782,11 @@ namespace osc {
     {
         int num_edges = 3*(indexBuffer1.size + indexBuffer2.size);
         resultBuffer.download(h_result, num_edges);
+
+        // download once
+        resultBuffer.free();
+
+        launchParamsBuffer.free();
     }
 
 }
