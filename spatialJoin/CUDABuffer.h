@@ -21,6 +21,7 @@
 #include <vector>
 #include <assert.h>
 
+
 /*! \namespace osc - Optix Siggraph Course */
 namespace osc {
 
@@ -42,15 +43,21 @@ namespace osc {
     {
       assert(d_ptr == nullptr);
       this->sizeInBytes = size;
-      CUDA_CHECK(Malloc( (void**)&d_ptr, sizeInBytes));
+      // CUDA_CHECK(Malloc( (void**)&d_ptr, sizeInBytes));
+
+      CUDA_CHECK(MallocAsync( (void**)&d_ptr, sizeInBytes, 0));
     }
 
     //! free allocated memory
     void free()
     {
-      CUDA_CHECK(Free(d_ptr));
+
+      // CUDA_CHECK(Free(d_ptr));
+      CUDA_CHECK(FreeAsync(d_ptr, 0));
+
       d_ptr = nullptr;
       sizeInBytes = 0;
+
     }
 
     template<typename T>
@@ -66,8 +73,10 @@ namespace osc {
     {
       assert(d_ptr != nullptr);
       assert(sizeInBytes == count*sizeof(T));
-      CUDA_CHECK(Memcpy(d_ptr, (void *)t,
-                        count*sizeof(T), cudaMemcpyHostToDevice));
+      // CUDA_CHECK(Memcpy(d_ptr, (void *)t,
+      //                   count*sizeof(T), cudaMemcpyHostToDevice));
+      CUDA_CHECK(MemcpyAsync(d_ptr, (void *)t,
+                         count*sizeof(T), cudaMemcpyHostToDevice));  
     }
     
     template<typename T>
