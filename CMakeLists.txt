@@ -74,4 +74,4 @@ add_subdirectory(common/glfWindow EXCLUDE_FROM_ALL)
 set(optix_LIBRARY "")
 
 add_subdirectory(spatialJoin)
-# add_subdirectory(baseline)
+add_subdirectory(baseline)
