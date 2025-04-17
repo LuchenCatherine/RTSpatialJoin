@@ -15,6 +15,8 @@
 # ======================================================================== #
 
 find_package(OpenGL REQUIRED)
+# filesystem
+find_package(Boost REQUIRED COMPONENTS filesystem)
 
 include_directories(${OptiX_INCLUDE})
 
@@ -40,4 +42,5 @@ target_link_libraries(main
   glfWindow
   glfw
   ${OPENGL_gl_LIBRARY}
+  ${Boost_LIBRARIES}
   )
