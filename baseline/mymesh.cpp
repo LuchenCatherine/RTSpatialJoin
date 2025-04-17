@@ -19,18 +19,19 @@ bool Mymesh::load_from_off(const std::string &file_path) {
 
     this->label = AS_name;
     this->is_surface = true;
+    this->size_faces = this->mesh.num_faces();
     if (CGAL::is_closed(this->mesh)){
         this->is_closed = true;
     }
     // else std::cout << this->label << " is not closed" << std::endl;
     this->volume = abs(PMP::volume(this->mesh) * 1e9);
 
-    if (AS_name.find("Skin") != std::string::npos || AS_name.find("skin") != std::string::npos)
-    {
-        this->volume = PMP::area(this->mesh) * 0.001 * 1e9;
-        std::cout << AS_name << "total skin: " << PMP::volume(this->mesh) * 1e9 << " surface within 1mm: " << this->volume << std::endl;
+    // if (AS_name.find("Skin") != std::string::npos || AS_name.find("skin") != std::string::npos)
+    // {
+    //     this->volume = PMP::area(this->mesh) * 0.001 * 1e9;
+    //     std::cout << AS_name << "total skin: " << PMP::volume(this->mesh) * 1e9 << " surface within 1mm: " << this->volume << std::endl;
 
-    }
+    // }
     return true;
 
 }
@@ -96,7 +97,7 @@ Tree* Mymesh::get_aabb_tree()
 Mymesh::Mymesh(const std::string &file_path)
 {
     load_from_off(file_path);
-    triangulate_mesh();
+    // triangulate_mesh();
 }
 
 Mymesh::Mymesh(const Surface_mesh sm)

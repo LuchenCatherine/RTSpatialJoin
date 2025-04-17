@@ -58,6 +58,8 @@ class Mymesh{
         bool is_closed;
         bool is_surface;
         double volume = 0.0;
+        
+        int size_faces = 0;
         std::string to_wkt();
 };
 
