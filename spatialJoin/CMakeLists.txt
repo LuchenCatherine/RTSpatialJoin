@@ -20,16 +20,16 @@ find_package(Boost REQUIRED COMPONENTS filesystem)
 
 include_directories(${OptiX_INCLUDE})
 
-cuda_compile_and_embed(embedded_ptx_code devicePrograms.cu)
+cuda_compile_and_embed(embedded_ptx_code devicePrograms2.cu)
 
 add_executable(main
   ${embedded_ptx_code}
   optix7.h
   CUDABuffer.h
-  LaunchParams.h
-  SpatialJoinRenderer.h
-  SpatialJoinRenderer.cpp
-  main.cpp
+  LaunchParams2.h
+  SpatialJoinRenderer2.h
+  SpatialJoinRenderer2.cpp
+  main2.cpp
   )
 
 target_link_libraries(main
