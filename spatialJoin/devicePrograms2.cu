@@ -118,6 +118,7 @@ namespace osc {
     auto ind2 = (vec3i*) d_indices_2;
 
     auto result = (int*) optixLaunchParams.resultBuffer.d_pointer();
+    *result = 0;
 
     int idx_p1, idx_p2;
     vec3f p1, p2, rayDir;

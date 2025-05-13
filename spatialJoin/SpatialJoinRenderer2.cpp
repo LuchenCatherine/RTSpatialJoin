@@ -160,14 +160,13 @@ namespace osc {
     /* Build spatial index for static rendered models*/
     void SpatialJoinRenderer::render(const std::vector<TriangleMesh>& models, const int launchDim)
     {
+        // set the number of background models
+        n_models = models.size();
 
         std::cout << "#spatial join: upload model data ..." << std::endl;
         uploadMeshData(models);
 
-        std::cout << "#spatial join: build acceleration structures ..." << std::endl;
-        n_models = models.size();
-        std::cout << "Total models: " << n_models << std::endl;
-
+        std::cout << "#spatial join: build acceleration structures for background models ..." << std::endl;
         buildAccel(models, vertexBuffers, indexBuffers, asBuffers, traversables);
         
         std::cout << "#spatial join: launchDim: " << launchDim << std::endl;
@@ -178,13 +177,30 @@ namespace osc {
 
     void SpatialJoinRenderer::query(const TriangleMesh &query_model) 
     {
+        auto t1 = std::chrono::high_resolution_clock::now();
 
         vertexBuffer2.alloc_and_upload(query_model.vertex);
         indexBuffer2.alloc_and_upload(query_model.index);
-        std::cout << "Total models: " << n_models << std::endl;
+        
+        std::cout << "#spatial join: build acceleration structure for query model..." << std::endl;
         traversable2 = buildAccel(query_model, vertexBuffer2, indexBuffer2, asBuffer2);
 
-        for (int i = 0; i < n_models; i++) query_single(query_model, i);
+        std::cout << "#query result: ";
+        int intersected;
+
+        for (int i = 0; i < n_models; i++) {
+            intersected = query_single(query_model, i);
+            std::cout << intersected << " ";
+        }
+
+        std::cout << std::endl;
+
+        auto t2 = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double> duration;
+        
+        duration = t2 - t1;
+        std::cout << "#spatial query takes " << duration.count() << " seconds with " << n_models << " background models" << std::endl; 
+        
     }
 
     
@@ -235,7 +251,7 @@ namespace osc {
         
 
         for (int i = 0; i < models.size(); i++) {
-            std::cout << "model " << i << std::endl;
+            std::cout << "model " << i << ": ";
             traversables[i] = buildAccel(models[i], vertexBuffers[i], indexBuffers[i], asBuffers[i]);
         }
 
