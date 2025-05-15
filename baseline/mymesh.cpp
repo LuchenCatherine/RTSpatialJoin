@@ -10,12 +10,14 @@ bool Mymesh::load_from_off(const std::string &file_path) {
 
     std::string AS_name = fs::path(file_path).stem().string();
 
-    if (!input ||!(input >> this->mesh) || this->mesh.is_empty()){
-        std::cerr << file_path <<  " Not a valid mesh" << std::endl;
-        this->is_surface = false;
-        this->is_closed = false;
-        return false;
-    }
+    // if (!input ||!(input >> this->mesh) || this->mesh.is_empty()){
+    //     std::cerr << file_path <<  " Not a valid mesh" << std::endl;
+    //     this->is_surface = false;
+    //     this->is_closed = false;
+    //     return false;
+    // }
+
+    load_non_manifold_mesh(file_path, this->mesh);
 
     this->label = AS_name;
     this->is_surface = true;
@@ -33,6 +35,22 @@ bool Mymesh::load_from_off(const std::string &file_path) {
 
     // }
     return true;
+
+}
+
+void Mymesh::load_non_manifold_mesh(std::string file_path, Surface_mesh &mesh)
+{
+  std::vector<Point> points;
+  std::vector<std::vector<std::size_t> > polygons;
+
+  if (!CGAL::IO::read_polygon_soup(file_path, points, polygons) || points.empty())
+  {
+    std::cerr << "Cannot open file " << std::endl;
+    return;
+  }
+
+  CGAL::Polygon_mesh_processing::orient_polygon_soup(points, polygons);
+  CGAL::Polygon_mesh_processing::polygon_soup_to_polygon_mesh(points, polygons, mesh);
 
 }
 

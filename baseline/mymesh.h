@@ -13,6 +13,11 @@
 #include<boost/filesystem.hpp>
 #include<cmath>
 
+#include <CGAL/IO/polygon_soup_io.h>
+#include <CGAL/Polygon_mesh_processing/orient_polygon_soup.h>
+#include <CGAL/Polygon_mesh_processing/polygon_soup_to_polygon_mesh.h>
+#include <CGAL/Polygon_mesh_processing/orientation.h>
+
 typedef CGAL::Simple_cartesian<double> Kernel;
 typedef Kernel::Point_3 Point;
 typedef Kernel::Triangle_3 Triangle;
@@ -41,6 +46,7 @@ class Mymesh{
         ~Mymesh(){};
 
         bool load_from_off(const std::string &file_path);
+        void load_non_manifold_mesh(std::string file_path, Surface_mesh &mesh);
         bool triangulate_mesh();
         bool point_inside(Point &query);
         double percentage_points_inside(std::vector<Point> &query);
