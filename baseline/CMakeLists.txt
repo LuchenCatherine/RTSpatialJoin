@@ -19,7 +19,7 @@ find_package(Boost REQUIRED COMPONENTS filesystem)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR})
 
 add_executable(cpu_baseline
-    cpu_cgal.cpp
+    cpu_cgal2.cpp
     mymesh.cpp
   )
 
