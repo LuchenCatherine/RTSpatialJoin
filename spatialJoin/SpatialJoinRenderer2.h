@@ -78,13 +78,14 @@ namespace osc {
             void uploadMeshData(const std::vector<TriangleMesh>& models);
             
             /*! build an acceleration structure for the given triangle mesh */
-            OptixTraversableHandle buildAccel(const TriangleMesh &model, CUDABuffer &vertexBuffer, CUDABuffer &indexBuffer, CUDABuffer &asBuffer);
+            OptixTraversableHandle buildGAS(const TriangleMesh &model, CUDABuffer &vertexBuffer, CUDABuffer &indexBuffer, CUDABuffer &gasBuffer);
 
             /*! build an array of traversables for the given array of models */
-            void buildAccel(const std::vector<TriangleMesh>& models, std::vector<CUDABuffer>& vertexBuffers, 
-                std::vector<CUDABuffer>& indexBuffers, std::vector<CUDABuffer>& asBuffers, std::vector<OptixTraversableHandle>& traversables);
+            void buildGAS(const std::vector<TriangleMesh>& models, std::vector<CUDABuffer>& vertexBuffers, 
+                std::vector<CUDABuffer>& indexBuffers, std::vector<CUDABuffer>& gasBuffers, std::vector<OptixTraversableHandle>& traversables);
             
-
+            OptixTraversableHandle buildIAS(const std::vector<OptixTraversableHandle>& traversables, CUDABuffer& iasBuffer);
+            
         protected: 
             /*! @{ CUDA device context and stream that optix pipeline will run
             on, as well as device properties for this device */
@@ -126,16 +127,19 @@ namespace osc {
             std::vector<CUDABuffer> vertexBuffers;
             std::vector<CUDABuffer> indexBuffers;
 
-            //! buffer that keeps the (final, compacted) accel structure
-            std::vector<CUDABuffer> asBuffers;
+            //! buffer that keeps the (final, compacted) GAS accel structure
+            std::vector<CUDABuffer> gasBuffers;
             std::vector<OptixTraversableHandle> traversables;
+
+            ///! buffer that keeps the (final, compacted) IAS accel structure
+            CUDABuffer iasBuffer;
             
             /*! For query model */
             CUDABuffer vertexBuffer2;
             CUDABuffer indexBuffer2;
             OptixTraversableHandle traversable2;
 
-            CUDABuffer asBuffer2;
+            CUDABuffer gasBuffer2;
 
             /*! keep the result */
             CUDABuffer resultBuffer;

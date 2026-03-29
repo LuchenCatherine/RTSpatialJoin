@@ -167,7 +167,8 @@ namespace osc {
         uploadMeshData(models);
 
         std::cout << "#spatial join: build acceleration structures for background models ..." << std::endl;
-        buildAccel(models, vertexBuffers, indexBuffers, asBuffers, traversables);
+        buildGAS(models, vertexBuffers, indexBuffers, gasBuffers, traversables);
+        buildIAS(traversables, iasBuffer);
         
         std::cout << "#spatial join: launchDim: " << launchDim << std::endl;
         launchParams.dimension_x = launchDim;
@@ -183,7 +184,7 @@ namespace osc {
         indexBuffer2.alloc_and_upload(query_model.index);
         
         std::cout << "#spatial join: build acceleration structure for query model..." << std::endl;
-        traversable2 = buildAccel(query_model, vertexBuffer2, indexBuffer2, asBuffer2);
+        traversable2 = buildGAS(query_model, vertexBuffer2, indexBuffer2, gasBuffer2);
 
         std::cout << "#query result: ";
         int intersected;
@@ -245,18 +246,112 @@ namespace osc {
     }
 
     /*! batch build acceleration structures*/
-    void SpatialJoinRenderer::buildAccel(const std::vector<TriangleMesh>& models, std::vector<CUDABuffer>& vertexBuffers, 
-        std::vector<CUDABuffer>& indexBuffers, std::vector<CUDABuffer>& asBuffers, std::vector<OptixTraversableHandle>& traversables) 
+    void SpatialJoinRenderer::buildGAS(const std::vector<TriangleMesh>& models, std::vector<CUDABuffer>& vertexBuffers, 
+        std::vector<CUDABuffer>& indexBuffers, std::vector<CUDABuffer>& gasBuffers, std::vector<OptixTraversableHandle>& traversables) 
     {
         
 
         for (int i = 0; i < models.size(); i++) {
             std::cout << "model " << i << ": ";
-            traversables[i] = buildAccel(models[i], vertexBuffers[i], indexBuffers[i], asBuffers[i]);
+            traversables[i] = buildGAS(models[i], vertexBuffers[i], indexBuffers[i], gasBuffers[i]);
         }
 
     }
 
+    OptixTraversableHandle SpatialJoinRenderer::buildIAS(const std::vector<OptixTraversableHandle>& traversables, CUDABuffer& iasBuffer) 
+    {
+        std::vector<OptixInstance> instances(traversables.size());
+
+        for (int i = 0; i < traversables.size(); i++) {
+            instances[i].instanceId = i;
+            instances[i].sbtOffset = 0;
+            instances[i].visibilityMask = 255;
+            instances[i].flags = OPTIX_INSTANCE_FLAG_NONE;
+            // identity matrix
+            instances[i].transform[0] = 1.f; instances[i].transform[1] = 0.f; instances[i].transform[2] = 0.f; instances[i].transform[3] = 0.f;
+            instances[i].transform[4] = 0.f; instances[i].transform[5] = 1.f; instances[i].transform[6] = 0.f; instances[i].transform[7] = 0.f;
+            instances[i].transform[8] = 0.f; instances[i].transform[9] = 0.f; instances[i].transform[10] = 1.f; instances[i].transform[11] = 0.f;
+
+            instances[i].traversableHandle = traversables[i];
+        }
+
+        CUDABuffer instanceBuffer;
+        instanceBuffer.alloc_and_upload(instances);
+
+        OptixBuildInput instanceInput = {};
+        instanceInput.type = OPTIX_BUILD_INPUT_TYPE_INSTANCES;
+        instanceInput.instanceArray.instances = instanceBuffer.d_pointer();
+        instanceInput.instanceArray.numInstances = (int)instances.size();
+
+        OptixAccelBuildOptions accelOptions = {};
+        accelOptions.buildFlags             = OPTIX_BUILD_FLAG_NONE | OPTIX_BUILD_FLAG_ALLOW_COMPACTION;
+        accelOptions.motionOptions.numKeys  = 1;
+        accelOptions.operation              = OPTIX_BUILD_OPERATION_BUILD;
+
+        OptixAccelBufferSizes iasBufferSizes;
+        OPTIX_CHECK(optixAccelComputeMemoryUsage
+                (optixContext,
+                 &accelOptions,
+                 &instanceInput,
+                 1,  // num_build_inputs
+                 &iasBufferSizes
+                 ));
+
+        CUDABuffer tempBuffer;
+        tempBuffer.alloc(iasBufferSizes.tempSizeInBytes);
+        
+        CUDABuffer outputBuffer;
+        outputBuffer.alloc(iasBufferSizes.outputSizeInBytes);
+        
+        // ==================================================================
+        // prepare compaction
+        // ==================================================================
+        CUDABuffer compactedSizeBuffer;
+        compactedSizeBuffer.alloc(sizeof(uint64_t));
+
+        OptixAccelEmitDesc emitDesc;
+        emitDesc.type   = OPTIX_PROPERTY_TYPE_COMPACTED_SIZE;
+        emitDesc.result = compactedSizeBuffer.d_pointer();
+
+        OptixTraversableHandle iasHandle;
+        OPTIX_CHECK(optixAccelBuild(optixContext,
+                                /* stream */0,
+                                &accelOptions,
+                                &instanceInput,
+                                1,  // num_build_inputs
+                                tempBuffer.d_pointer(),
+                                tempBuffer.sizeInBytes,
+
+                                outputBuffer.d_pointer(),
+                                outputBuffer.sizeInBytes,
+
+                                &iasHandle,
+
+                                &emitDesc,1
+                                ));
+        CUDA_SYNC_CHECK();
+
+        // perform compaction
+        uint64_t compactedSize;
+        compactedSizeBuffer.download(&compactedSize,1);
+        iasBuffer.alloc(compactedSize);
+        OPTIX_CHECK(optixAccelCompact(optixContext,
+                                  /*stream:*/0,
+                                  iasHandle,
+                                  iasBuffer.d_pointer(),
+                                  iasBuffer.sizeInBytes,
+                                  &iasHandle));
+        CUDA_SYNC_CHECK();
+
+
+        // clean up
+        tempBuffer.free();
+        outputBuffer.free(); // << the UNcompacted, temporary output buffer
+        compactedSizeBuffer.free();
+
+        return iasHandle;
+
+        }
 
     /*! batch upload for models*/
     void SpatialJoinRenderer::uploadMeshData(const std::vector<TriangleMesh>& models) {
@@ -267,17 +362,17 @@ namespace osc {
         // free memory on device
         for (auto& buffer: vertexBuffers) buffer.free();
         for (auto& buffer: indexBuffers) buffer.free();
-        for(auto& buffer: asBuffers) buffer.free();
+        for(auto& buffer: gasBuffers) buffer.free();
 
         // free memory on host
         vertexBuffers.clear();
         indexBuffers.clear();
-        asBuffers.clear();
+        gasBuffers.clear();
 
         // re-allocate memory on host for new models
         vertexBuffers.resize(N);
         indexBuffers.resize(N);
-        asBuffers.resize(N);
+        gasBuffers.resize(N);
         traversables.resize(N);
 
         // upload models from host to device
@@ -288,13 +383,13 @@ namespace osc {
 
     }
 
-    OptixTraversableHandle SpatialJoinRenderer::buildAccel(const TriangleMesh &model, CUDABuffer &vertexBuffer, CUDABuffer &indexBuffer, CUDABuffer &asBuffer)
+    OptixTraversableHandle SpatialJoinRenderer::buildGAS(const TriangleMesh &model, CUDABuffer &vertexBuffer, CUDABuffer &indexBuffer, CUDABuffer &gasBuffer)
     {
         // upload the model to the device: the builder, move upload mesh data to uploadMeshData function
         // vertexBuffer.alloc_and_upload(model.vertex);
         // indexBuffer.alloc_and_upload(model.index);
 
-        OptixTraversableHandle asHandle { 0 };
+        OptixTraversableHandle gasHandle { 0 };
 
         // ==================================================================
         // triangle inputs
@@ -387,7 +482,7 @@ namespace osc {
         cudaEventElapsedTime(&elapsedTime, startEvent, endEvent);  // Get the time in milliseconds
 
         // 6. Print the result
-        std::cout << "OptiX operation took " << elapsedTime << " ms" << std::endl;
+        std::cout << "OptiX operation took " << elapsedTime << " ms to build the acceleration structure" << std::endl;
 
         // 7. Cleanup events
         cudaEventDestroy(startEvent);
@@ -404,7 +499,7 @@ namespace osc {
                                 outputBuffer.d_pointer(),
                                 outputBuffer.sizeInBytes,
 
-                                &asHandle,
+                                &gasHandle,
 
                                 &emitDesc,1
                                 ));
@@ -420,13 +515,13 @@ namespace osc {
         uint64_t compactedSize;
         compactedSizeBuffer.download(&compactedSize,1);
 
-        asBuffer.alloc(compactedSize);
+        gasBuffer.alloc(compactedSize);
         OPTIX_CHECK(optixAccelCompact(optixContext,
                                   /*stream:*/0,
-                                  asHandle,
-                                  asBuffer.d_pointer(),
-                                  asBuffer.sizeInBytes,
-                                  &asHandle));
+                                  gasHandle,
+                                  gasBuffer.d_pointer(),
+                                  gasBuffer.sizeInBytes,
+                                  &gasHandle));
         CUDA_SYNC_CHECK();
 
         // ==================================================================
@@ -436,7 +531,7 @@ namespace osc {
         tempBuffer.free();
         compactedSizeBuffer.free();
 
-        return asHandle;
+        return gasHandle;
 
 
     }
